@@ -18,7 +18,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Pre-download the YOLO pose weights during build
-RUN python3 -c "from ultralytics import YOLO; YOLO('yolo11n-pose.pt')"
+RUN python3 -c "from ultralytics import YOLO; YOLO('yolo26n-pose.pt')"
 
 # Create the storage directory and give full write access inside the image
 RUN mkdir -p /app/videos /tmp/Ultralytics /tmp/matplotlib && \

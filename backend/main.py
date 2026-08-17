@@ -25,7 +25,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/videos", StaticFiles(directory=UPLOAD_DIR), name="videos")
 
 # Load pre-cached YOLO model
-model = YOLO("yolo11n-pose.pt")
+model = YOLO("yolo26n-pose.pt")
 
 @app.post("/api/upload")
 async def process_video(file: UploadFile = File(...)):
