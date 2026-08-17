@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Pose Tracker</title>
+    <!-- Tailwind CSS via CDN for instant styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Configure Tailwind for Dark Mode -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#151e2e',
+                            950: '#0b0f19',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen py-10 px-4 sm:px-6 lg:px-8 font-sans">
+    
+    <div class="w-full max-w-5xl mx-auto space-y-8">
+        <!-- Header -->
+        <div class="flex flex-col items-center text-center space-y-2">
+            <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold uppercase tracking-wider">
+                Edge Pose Detection
+            </div>
+            <h1 class="text-4xl font-extrabold tracking-tight sm:text-5xl text-white">
+                Workout Form Analyzer
+            </h1>
+            <p class="text-slate-400 text-sm max-w-lg">
+                Run local YOLOv8-Pose inference on your workout recordings with zero latency skeleton tracking.
+            </p>
+        </div>
+
+        <!-- Upload Card -->
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl">
+            <div class="flex flex-col sm:flex-row items-center gap-4">
+                
+                <!-- Custom File Input -->
+                <label class="flex-1 w-full flex items-center justify-between px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer hover:border-slate-700 transition">
+                    <span id="fileNameDisplay" class="text-sm text-slate-300 truncate">Select workout video (MP4)...</span>
+                    <input 
+                        type="file" 
+                        id="videoInput" 
+                        accept="video/mp4,video/quicktime" 
+                        class="hidden"
+                    />
+                    <!-- Upload Icon SVG -->
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-500">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                </label>
+
+                <!-- Analyze Button -->
+                <button 
+                    id="analyzeBtn" 
+                    disabled
+                    class="w-full sm:w-auto px-8 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-sm transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                    <span id="btnText">Analyze Video</span>
+                </button>
+            </div>
+
+            <!-- Status Indicator -->
+            <div id="statusAlert" class="mt-4 hidden items-center gap-2 text-sm text-slate-300 bg-slate-950 border border-slate-800 px-4 py-3 rounded-xl">
+                <!-- Check icon -->
+                <svg id="statusIcon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-emerald-400 shrink-0">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                    <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                </svg>
+                <span id="statusText">Analysis complete!</span>
+            </div>
+        </div>
+
+        <!-- Video Player & Canvas Container -->
+        <div id="playerSection" class="hidden space-y-4">
+            
+            <!-- Metrics Bar -->
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span id="resolutionBadge" class="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 border border-slate-700"></span>
+                    <span id="fpsBadge" class="text-xs font-semibold px-2.5 py-1 rounded-md bg-slate-800 text-slate-300 border border-slate-700"></span>
+                </div>
+                
+                <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-300 select-none">
+                    <input type="checkbox" id="toggleSkeleton" checked class="rounded bg-slate-800 border-slate-700 text-emerald-500 w-4 h-4 cursor-pointer">
+                    Show Skeleton Overlay
+                </label>
+            </div>
+
+            <!-- The Video + Canvas Stack -->
+            <div class="relative bg-black rounded-2xl overflow-hidden border border-slate-800 shadow-2xl aspect-video max-h-[70vh] flex items-center justify-center">
+                <video 
+                    id="videoPlayer" 
+                    controls 
+                    playsinline 
+                    class="w-full h-full object-contain"
+                ></video>
+                <canvas 
+                    id="skeletonCanvas" 
+                    class="absolute inset-0 w-full h-full object-contain pointer-events-none"
+                ></canvas>
+            </div>
+            
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        // COCO 17-Keypoint Connections for YOLOv8-Pose
+        const SKELETON_EDGES = [
+            [0, 1], [0, 2], [1, 3], [2, 4],       // Head
+            [5, 6],                               // Shoulders
+            [5, 7], [7, 9],                       // Left Arm
+            [6, 8], [8, 10],                      // Right Arm
+            [5, 11], [6, 12],                     // Torso
+            [11, 12],                             // Hips
+            [11, 13], [13, 15],                   // Left Leg
+            [12, 14], [14, 16]                    // Right Leg
+        ];
+
+        const API_BASE = `${window.location.protocol}//${window.location.hostname}:8000`;
+
+        // DOM Elements
+        const videoInput = document.getElementById('videoInput');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        const analyzeBtn = document.getElementById('analyzeBtn');
+        const btnText = document.getElementById('btnText');
+        const statusAlert = document.getElementById('statusAlert');
+        const statusText = document.getElementById('statusText');
+        const statusIcon = document.getElementById('statusIcon');
+        
+        const playerSection = document.getElementById('playerSection');
+        const resolutionBadge = document.getElementById('resolutionBadge');
+        const fpsBadge = document.getElementById('fpsBadge');
+        const toggleSkeleton = document.getElementById('toggleSkeleton');
+        
+        const videoPlayer = document.getElementById('videoPlayer');
+        const skeletonCanvas = document.getElementById('skeletonCanvas');
+        const ctx = skeletonCanvas.getContext('2d');
+
+        let videoData = null;
+
+        // File Selection Listener
+        videoInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                fileNameDisplay.textContent = file.name;
+                analyzeBtn.disabled = false;
+            }
+        });
+
+        // Upload & Analyze Listener
+        analyzeBtn.addEventListener('click', async () => {
+            const file = videoInput.files[0];
+            if (!file) return;
+
+            // UI Loading State
+            analyzeBtn.disabled = true;
+            btnText.textContent = "Analyzing...";
+            statusAlert.classList.remove('hidden');
+            statusAlert.classList.remove('text-red-400');
+            statusAlert.classList.add('text-emerald-400');
+            statusText.textContent = "Processing video with YOLOv8-Pose... this may take a few moments.";
+            
+            playerSection.classList.add('hidden');
+            videoData = null;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const res = await fetch(`${API_BASE}/api/upload`, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (!res.ok) throw new Error(`Server returned error ${res.status}`);
+
+                const data = await res.json();
+                videoData = data;
+                
+                // UI Success State
+                statusText.textContent = `Analysis complete! Extracted ${data.total_frames} frames.`;
+                resolutionBadge.textContent = `${data.width}x${data.height}`;
+                fpsBadge.textContent = `${data.fps} FPS`;
+                
+                // Load Video
+                videoPlayer.src = `${API_BASE}${data.video_url}`;
+                
+                // Sync Canvas size to video resolution when metadata loads
+                videoPlayer.onloadedmetadata = () => {
+                    skeletonCanvas.width = videoPlayer.videoWidth;
+                    skeletonCanvas.height = videoPlayer.videoHeight;
+                    playerSection.classList.remove('hidden');
+                };
+
+            } catch (err) {
+                // UI Error State
+                statusAlert.classList.remove('text-emerald-400');
+                statusAlert.classList.add('text-red-400');
+                statusText.textContent = `Error: ${err.message}`;
+            } finally {
+                analyzeBtn.disabled = false;
+                btnText.textContent = "Analyze Video";
+            }
+        });
+
+        // Draw Skeleton Frame-by-Frame
+        videoPlayer.addEventListener('timeupdate', () => {
+            if (!videoData || !videoData.frames) return;
+
+            // Find the closest JSON frame matching the video's current time
+            const currentFrameIdx = Math.floor(videoPlayer.currentTime * videoData.fps);
+            const frameData = videoData.frames.find((f) => f.frame === currentFrameIdx);
+
+            ctx.clearRect(0, 0, skeletonCanvas.width, skeletonCanvas.height);
+
+            // Check if skeleton toggle is active and data exists
+            if (toggleSkeleton.checked && frameData && frameData.keypoints && frameData.keypoints.length > 0) {
+                const kps = frameData.keypoints;
+
+                // Draw Bones (Lines)
+                ctx.strokeStyle = '#22c55e'; // Emerald Green
+                ctx.lineWidth = 5;
+                ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
+
+                SKELETON_EDGES.forEach(([i, j]) => {
+                    // Only draw if both keypoints exist and confidence > 40%
+                    if (kps[i] && kps[j] && kps[i].conf > 0.4 && kps[j].conf > 0.4) {
+                        ctx.beginPath();
+                        ctx.moveTo(kps[i].x, kps[i].y);
+                        ctx.lineTo(kps[j].x, kps[j].y);
+                        ctx.stroke();
+                    }
+                });
+
+                // Draw Joints (Dots)
+                ctx.fillStyle = '#ec4899'; // Magenta Pink
+                kps.forEach((kp) => {
+                    if (kp.conf > 0.4) {
+                        ctx.beginPath();
+                        ctx.arc(kp.x, kp.y, 7, 0, 2 * Math.PI);
+                        ctx.fill();
+                    }
+                });
+            }
+        });
+
+        // Trigger redraw if user clicks the checkbox while paused
+        toggleSkeleton.addEventListener('change', () => {
+            if (videoPlayer.paused) {
+                videoPlayer.dispatchEvent(new Event('timeupdate'));
+            }
+        });
+    </script>
+</body>
+</html>
